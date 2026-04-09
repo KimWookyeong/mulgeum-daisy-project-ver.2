@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom/client'; // 렌더링을 위해 필요합니다.
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -36,10 +37,10 @@ import {
 } from 'lucide-react';
 
 /**
- * [물금동아 데이지 프로젝트 - 관리자 모드 및 인증 오류 최종 해결본]
- * 1. 관리자 지도 로딩: nickname 변경 시 지도 초기화 로직 연동
- * 2. 삭제/초기화 실패 해결: Firebase auth.currentUser 실시간 체크 및 강제 인증
- * 3. 디자인: 흰색 꽃잎 시인성 개선 (테두리 및 그림자)
+ * [물금동아 데이지 프로젝트 - 최종 통합 복구본]
+ * 1. 실행 오류 해결: ReactDOM.createRoot 렌더링 코드 추가
+ * 2. 관리자 모드 최적화: 지도 로딩 지연 및 삭제/초기화 권한 로직 강화
+ * 3. 디자인: 연노랑 배경에서 흰색 꽃잎이 잘 보이도록 테두리(Stroke) 보강
  */
 
 const firebaseConfig = {
@@ -52,8 +53,8 @@ const firebaseConfig = {
   databaseURL: "https://fourseason-run-and-map-default-rtdb.firebaseio.com/" 
 };
 
-// 고유 앱 아이디 (데이터 꼬임 방지를 위해 v5로 업데이트)
-const appId = 'mulgeum-daisy-advanced-final-v5'; 
+// 고유 앱 아이디
+const appId = 'mulgeum-daisy-advanced-final-v6'; 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -69,7 +70,7 @@ const TRASH_CATEGORIES = [
 const AREAS = ["물금읍", "증산리", "가촌리", "범어리", "기타 구역"];
 const INITIAL_CENTER = [35.327, 129.007]; 
 
-// 디자인 개선된 데이지 꽃 글자
+// 디자인 개선된 데이지 꽃 글자 디자인
 const DaisyLetter = ({ letter }) => (
   <div className="relative inline-flex items-center justify-center w-[42px] h-[42px] mx-[1px] align-middle">
     <svg viewBox="0 0 100 100" className="absolute w-full h-full drop-shadow-md">
@@ -140,7 +141,7 @@ const App = () => {
     reader.readAsDataURL(file);
   };
 
-  // 1. 인증 초기화
+  // 1. 인증 초기화 (Rule 3)
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -152,7 +153,7 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. 실시간 데이터 수신
+  // 2. 실시간 데이터 수신 (Rule 1 & 3)
   useEffect(() => {
     const currentUser = user || auth.currentUser;
     if (!currentUser) return;
@@ -194,7 +195,7 @@ const App = () => {
         setTimeout(() => { if (leafletMap.current) leafletMap.current.invalidateSize(); }, 400);
       }
     }
-  }, [isScriptLoaded, activeTab, isSettingNickname, nickname]); // nickname 추가로 관리자 로그인 대응
+  }, [isScriptLoaded, activeTab, isSettingNickname, nickname]);
 
   const updateMarkers = (data) => {
     if (!window.L || !leafletMap.current) return;
@@ -256,20 +257,17 @@ const App = () => {
     } catch (err) { alert("업로드 실패!"); } finally { setIsUploading(false); }
   };
 
-  // 개별 삭제 (관리자 기능 강화)
   const handleDelete = async (reportId) => {
     if (!isAdmin && !window.confirm("본인의 기록을 삭제하시겠습니까?")) return;
     if (isAdmin && !window.confirm("관리자 권한으로 이 기록을 삭제하시겠습니까?")) return;
 
     try {
-      // 삭제 시에도 인증 체크 필수 (Rule 3)
       if (!auth.currentUser) await signInAnonymously(auth);
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', reportId));
       alert("기록이 삭제되었습니다.");
-    } catch (err) { alert("삭제 실패: 권한이 없거나 네트워크 오류입니다."); }
+    } catch (err) { alert("삭제 실패: " + err.message); }
   };
 
-  // 전체 데이터 초기화 (관리자 전용)
   const clearAllData = async () => {
     if (!isAdmin) return;
     if (window.confirm("🚨 경고: 관리자 권한으로 모든 활동 기록을 영구 삭제하시겠습니까?")) {
@@ -430,5 +428,11 @@ const App = () => {
     </div>
   );
 };
+
+// ---------------------------------------------------------
+// [핵심] 이 코드가 있어야 화면에 실제 앱이 나타납니다.
+// ---------------------------------------------------------
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
 
 export default App;

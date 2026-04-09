@@ -38,9 +38,9 @@ import {
 
 /**
  * [물금동아 데이지 프로젝트 - 최종 통합 복구본]
- * 1. 실행 오류 해결: ReactDOM.createRoot 렌더링 코드 추가
- * 2. 관리자 모드 최적화: 지도 로딩 지연 및 삭제/초기화 권한 로직 강화
- * 3. 디자인: 연노랑 배경에서 흰색 꽃잎이 잘 보이도록 테두리(Stroke) 및 대비 강화
+ * 1. 디자인 수정: "데/이/지" 꽃 크기 축소 및 슬로건 한 줄 정렬 최적화
+ * 2. 실행 오류 해결: ReactDOM.createRoot 렌더링 코드 유지
+ * 3. 관리자 모드 최적화: 지도 로딩 지연 및 삭제/초기화 권한 로직 강화
  */
 
 const firebaseConfig = {
@@ -54,7 +54,7 @@ const firebaseConfig = {
 };
 
 // 고유 앱 아이디
-const appId = 'mulgeum-daisy-advanced-final-v6'; 
+const appId = 'mulgeum-daisy-advanced-final-v7'; 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -70,23 +70,23 @@ const TRASH_CATEGORIES = [
 const AREAS = ["물금읍", "증산리", "가촌리", "범어리", "기타 구역"];
 const INITIAL_CENTER = [35.327, 129.007]; 
 
-// 시인성이 강화된 데이지 꽃 글자 디자인
+// 크기가 최적화된 데이지 꽃 글자 디자인
 const DaisyLetter = ({ letter }) => (
-  <div className="relative inline-flex items-center justify-center w-[48px] h-[48px] mx-[2px] align-middle">
-    <svg viewBox="0 0 100 100" className="absolute w-full h-full drop-shadow-lg">
+  <div className="relative inline-flex items-center justify-center w-[36px] h-[36px] mx-[1px] align-middle">
+    <svg viewBox="0 0 100 100" className="absolute w-full h-full drop-shadow-md">
       {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
         <ellipse 
           key={angle} 
           cx="50" cy="25" rx="14" ry="28" 
           fill="white" 
-          stroke="#fbbf24" // 대비를 위해 더 진한 노란색 테두리 적용
+          stroke="#fbbf24" 
           strokeWidth="3"
           transform={`rotate(${angle} 50 50)`} 
         />
       ))}
       <circle cx="50" cy="50" r="20" fill="#fbbf24" stroke="#d97706" strokeWidth="2" />
     </svg>
-    <span className="relative z-10 font-black text-[17px] text-[#451a03] mt-[1px]">{letter}</span>
+    <span className="relative z-10 font-black text-[14px] text-[#451a03] mt-[1px]">{letter}</span>
   </div>
 );
 
@@ -141,7 +141,7 @@ const App = () => {
     reader.readAsDataURL(file);
   };
 
-  // 1. 인증 초기화 (Rule 3)
+  // 1. 인증 초기화
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -153,7 +153,7 @@ const App = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. 실시간 데이터 수신 (Rule 1 & 3)
+  // 2. 실시간 데이터 수신
   useEffect(() => {
     const currentUser = user || auth.currentUser;
     if (!currentUser) return;
@@ -179,7 +179,7 @@ const App = () => {
     document.head.appendChild(script);
   }, []);
 
-  // 4. 지도 초기화 및 크기 보정 (관리자 모드 대응)
+  // 4. 지도 초기화 및 크기 보정
   useEffect(() => {
     if (isScriptLoaded && !isSettingNickname && activeTab === 'map' && mapContainerRef.current) {
       if (!leafletMap.current) {
@@ -286,15 +286,15 @@ const App = () => {
   if (isSettingNickname) {
     return (
       <div className="fixed inset-0 bg-[#fefce8] flex flex-col items-center justify-center p-5 z-[9999]">
-        <div className="mb-10 text-center">
-          <div className="bg-[#fbbf24] w-[70px] h-[70px] rounded-[24px] flex items-center justify-center mx-auto mb-6 shadow-lg -rotate-6">
-            <Flower2 size={40} color="white" />
+        <div className="mb-10 text-center w-full">
+          <div className="bg-[#fbbf24] w-[60px] h-[60px] rounded-[22px] flex items-center justify-center mx-auto mb-6 shadow-lg -rotate-6">
+            <Flower2 size={34} color="white" />
           </div>
-          <h1 className="text-4xl font-black text-[#92400e] mb-5 tracking-tight">물금동아</h1>
-          <div className="flex flex-wrap items-center justify-center gap-1">
-            <DaisyLetter letter="데" /><span className="text-sm font-extrabold text-[#78350f]">이터를</span>
-            <DaisyLetter letter="이" /><span className="text-sm font-extrabold text-[#78350f]">용한</span>
-            <DaisyLetter letter="지" /><span className="text-sm font-extrabold text-[#78350f]">역 쓰레기 해결</span>
+          <h1 className="text-3xl font-black text-[#92400e] mb-5 tracking-tight">물금동아</h1>
+          <div className="flex items-center justify-center gap-[2px] whitespace-nowrap overflow-hidden">
+            <DaisyLetter letter="데" /><span className="text-[13px] font-extrabold text-[#78350f]">이터를</span>
+            <DaisyLetter letter="이" /><span className="text-[13px] font-extrabold text-[#78350f]">용한</span>
+            <DaisyLetter letter="지" /><span className="text-[13px] font-extrabold text-[#78350f]">역 쓰레기 해결</span>
           </div>
         </div>
         <div className="bg-white p-8 rounded-[40px] w-full max-w-[360px] text-center shadow-xl border border-yellow-100">

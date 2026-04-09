@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import ReactDOM from 'react-dom/client';
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
@@ -37,10 +36,10 @@ import {
 } from 'lucide-react';
 
 /**
- * [물금동아 데이지 프로젝트 - 관리자 모드 및 기능 완전 복구본]
- * 1. 해결: 관리자 로그인 시 지도 안 뜨는 현상 (렌더링 타이밍 수정)
- * 2. 해결: 개별 기록 삭제 및 전체 데이터 초기화 에러 (인증 가드 추가)
- * 3. 디자인: 데이지 꽃 시인성 개선 테두리 유지
+ * [물금동아 데이지 프로젝트 - 관리자 모드 및 인증 오류 최종 해결본]
+ * 1. 관리자 지도 로딩: nickname 변경 시 지도 초기화 로직 연동
+ * 2. 삭제/초기화 실패 해결: Firebase auth.currentUser 실시간 체크 및 강제 인증
+ * 3. 디자인: 흰색 꽃잎 시인성 개선 (테두리 및 그림자)
  */
 
 const firebaseConfig = {
@@ -53,8 +52,8 @@ const firebaseConfig = {
   databaseURL: "https://fourseason-run-and-map-default-rtdb.firebaseio.com/" 
 };
 
-// Firestore 규칙 준수를 위한 고유 앱 아이디
-const appId = 'mulgeum-daisy-advanced-final-v3'; 
+// 고유 앱 아이디 (데이터 꼬임 방지를 위해 v5로 업데이트)
+const appId = 'mulgeum-daisy-advanced-final-v5'; 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -70,10 +69,10 @@ const TRASH_CATEGORIES = [
 const AREAS = ["물금읍", "증산리", "가촌리", "범어리", "기타 구역"];
 const INITIAL_CENTER = [35.327, 129.007]; 
 
-// 디자인 개선된 데이지 꽃 글자 디자인
+// 디자인 개선된 데이지 꽃 글자
 const DaisyLetter = ({ letter }) => (
-  <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', margin: '0 1px', verticalAlign: 'middle' }}>
-    <svg viewBox="0 0 100 100" style={{ position: 'absolute', width: '100%', height: '100%', filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.1))' }}>
+  <div className="relative inline-flex items-center justify-center w-[42px] h-[42px] mx-[1px] align-middle">
+    <svg viewBox="0 0 100 100" className="absolute w-full h-full drop-shadow-md">
       {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
         <ellipse 
           key={angle} 
@@ -86,7 +85,7 @@ const DaisyLetter = ({ letter }) => (
       ))}
       <circle cx="50" cy="50" r="18" fill="#fbbf24" stroke="#d97706" strokeWidth="1" />
     </svg>
-    <span style={{ position: 'relative', zIndex: 1, fontWeight: '900', fontSize: '15px', color: '#451a03', marginTop: '1px' }}>{letter}</span>
+    <span className="relative z-10 font-black text-[15px] text-[#451a03] mt-[1px]">{letter}</span>
   </div>
 );
 
@@ -110,7 +109,7 @@ const App = () => {
 
   const isAdmin = nickname.toLowerCase() === 'admin';
 
-  // 이미지 압축 로직
+  // 이미지 압축
   const compressImage = (base64) => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -141,23 +140,23 @@ const App = () => {
     reader.readAsDataURL(file);
   };
 
-  // 1. 인증 초기화 (Rule 3 준수)
+  // 1. 인증 초기화
   useEffect(() => {
     const initAuth = async () => {
       try {
-        await signInAnonymously(auth);
-      } catch (err) {
-        console.error("인증 실패:", err);
-      }
+        if (!auth.currentUser) await signInAnonymously(auth);
+      } catch (err) { console.error("인증 실패:", err); }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    const unsubscribe = onAuthStateChanged(auth, setUser);
     return () => unsubscribe();
   }, []);
 
-  // 2. 데이터 실시간 수신 (Rule 1 & 3 준수)
+  // 2. 실시간 데이터 수신
   useEffect(() => {
-    if (!user) return;
+    const currentUser = user || auth.currentUser;
+    if (!currentUser) return;
+
     const reportsCollection = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
     const unsubscribe = onSnapshot(reportsCollection, (snapshot) => {
       const formatted = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
@@ -179,28 +178,23 @@ const App = () => {
     document.head.appendChild(script);
   }, []);
 
-  // 4. 지도 초기화 및 크기 보정 (중요: admin 로그인 직후 지도가 안 뜨는 문제 해결)
+  // 4. 지도 초기화 및 크기 보정 (관리자 모드 대응)
   useEffect(() => {
     if (isScriptLoaded && !isSettingNickname && activeTab === 'map' && mapContainerRef.current) {
       if (!leafletMap.current) {
-        // DOM이 안정화된 후 지도를 생성하기 위해 약간 더 긴 지연 시간을 줌
         setTimeout(() => {
           if (!mapContainerRef.current) return;
           leafletMap.current = window.L.map(mapContainerRef.current, { 
-            zoomControl: false, 
-            attributionControl: false 
+            zoomControl: false, attributionControl: false 
           }).setView(INITIAL_CENTER, 14);
           window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMap.current);
           updateMarkers(reports);
         }, 600);
       } else { 
-        // 탭 전환 시 지도가 깨지는 현상 방지
-        setTimeout(() => {
-          if (leafletMap.current) leafletMap.current.invalidateSize();
-        }, 400);
+        setTimeout(() => { if (leafletMap.current) leafletMap.current.invalidateSize(); }, 400);
       }
     }
-  }, [isScriptLoaded, activeTab, isSettingNickname]);
+  }, [isScriptLoaded, activeTab, isSettingNickname, nickname]); // nickname 추가로 관리자 로그인 대응
 
   const updateMarkers = (data) => {
     if (!window.L || !leafletMap.current) return;
@@ -244,7 +238,12 @@ const App = () => {
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!user) return alert("인증 처리 중입니다. 잠시만 기다려주세요.");
+    let currentAuthUser = auth.currentUser || user;
+    if (!currentAuthUser) {
+      try { const cred = await signInAnonymously(auth); currentAuthUser = cred.user; }
+      catch (err) { return alert("인증 오류가 발생했습니다."); }
+    }
+
     setIsUploading(true);
     try {
       const center = leafletMap.current ? leafletMap.current.getCenter() : { lat: INITIAL_CENTER[0], lng: INITIAL_CENTER[1] };
@@ -253,66 +252,59 @@ const App = () => {
       await addDoc(coll, { ...formData, location: loc, userName: nickname, discoveredTime: new Date().toISOString() });
       setFormData({ category: 'cup', area: AREAS[0], description: '', status: 'pending', customLocation: null, image: null });
       setActiveTab('map');
-      alert("지도에 업로드되었습니다! 🌼");
+      alert("성공적으로 업로드되었습니다! 🌼");
     } catch (err) { alert("업로드 실패!"); } finally { setIsUploading(false); }
   };
 
-  // 개별 삭제 기능 수정 (Rule 3 준수)
+  // 개별 삭제 (관리자 기능 강화)
   const handleDelete = async (reportId) => {
-    if (!user) return;
-    if (window.confirm("이 기록을 삭제하시겠습니까?")) {
-      try {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', reportId));
-        alert("기록이 삭제되었습니다.");
-      } catch (err) {
-        alert("삭제에 실패했습니다: " + err.message);
-      }
-    }
+    if (!isAdmin && !window.confirm("본인의 기록을 삭제하시겠습니까?")) return;
+    if (isAdmin && !window.confirm("관리자 권한으로 이 기록을 삭제하시겠습니까?")) return;
+
+    try {
+      // 삭제 시에도 인증 체크 필수 (Rule 3)
+      if (!auth.currentUser) await signInAnonymously(auth);
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', reportId));
+      alert("기록이 삭제되었습니다.");
+    } catch (err) { alert("삭제 실패: 권한이 없거나 네트워크 오류입니다."); }
   };
 
-  // 전체 초기화 기능 수정 (Rule 3 준수)
+  // 전체 데이터 초기화 (관리자 전용)
   const clearAllData = async () => {
-    if (!isAdmin || !user) return;
-    if (window.confirm("🚨 경고: 모든 활동 기록이 영구 삭제됩니다. 계속하시겠습니까?")) {
+    if (!isAdmin) return;
+    if (window.confirm("🚨 경고: 관리자 권한으로 모든 활동 기록을 영구 삭제하시겠습니까?")) {
       try {
+        if (!auth.currentUser) await signInAnonymously(auth);
         const coll = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
         const snapshot = await getDocs(coll);
         const batch = writeBatch(db);
-        snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+        snapshot.docs.forEach((d) => batch.delete(d.ref));
         await batch.commit();
-        alert("모든 기록이 초기화되었습니다.");
-      } catch (err) { 
-        alert("초기화 실패: " + err.message); 
-      }
+        alert("모든 기록이 깨끗하게 초기화되었습니다.");
+      } catch (err) { alert("초기화 실패: " + err.message); }
     }
   };
 
   if (isSettingNickname) {
     return (
-      <div style={{ position: 'fixed', inset: 0, backgroundColor: '#fefce8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 9999 }}>
-        <div style={{ marginBottom: '40px', textAlign: 'center' }}>
-          <div style={{ backgroundColor: '#fbbf24', width: '70px', height: '70px', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 25px', transform: 'rotate(-5deg)', boxShadow: '0 10px 25px rgba(251,191,36,0.2)' }}>
+      <div className="fixed inset-0 bg-[#fefce8] flex flex-col items-center justify-center p-5 z-[9999]">
+        <div className="mb-10 text-center">
+          <div className="bg-[#fbbf24] w-[70px] h-[70px] rounded-[24px] flex items-center justify-center mx-auto mb-6 shadow-lg -rotate-6">
             <Flower2 size={40} color="white" />
           </div>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: '900', color: '#92400e', margin: '0 0 20px 0', letterSpacing: '-0.02em' }}>물금동아</h1>
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '2px', lineHeight: '1.2' }}>
-            <div style={{display:'flex', alignItems:'center'}}>
-              <DaisyLetter letter="데" /><span style={{ fontSize: '14px', fontWeight: '800', color: '#78350f' }}>이터를</span>
-            </div>
-            <div style={{display:'flex', alignItems:'center'}}>
-              <DaisyLetter letter="이" /><span style={{ fontSize: '14px', fontWeight: '800', color: '#78350f' }}>용한</span>
-            </div>
-            <div style={{display:'flex', alignItems:'center'}}>
-              <DaisyLetter letter="지" /><span style={{ fontSize: '14px', fontWeight: '800', color: '#78350f' }}>역 쓰레기 해결</span>
-            </div>
+          <h1 className="text-4xl font-black text-[#92400e] mb-5 tracking-tight">물금동아</h1>
+          <div className="flex flex-wrap items-center justify-center gap-1">
+            <DaisyLetter letter="데" /><span className="text-sm font-extrabold text-[#78350f]">이터를</span>
+            <DaisyLetter letter="이" /><span className="text-sm font-extrabold text-[#78350f]">용한</span>
+            <DaisyLetter letter="지" /><span className="text-sm font-extrabold text-[#78350f]">역 쓰레기 해결</span>
           </div>
         </div>
-        <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '40px', width: '100%', maxWidth: '360px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.05)' }}>
-          <h2 style={{ fontSize: '1.25rem', fontWeight: '900', color: '#78350f', marginBottom: '8px' }}>반가워요 활동가님!</h2>
-          <p style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '24px', opacity: 0.7 }}>실시간 지도에 합류하기 위해<br/>학번과 이름을 입력해 주세요.</p>
+        <div className="bg-white p-8 rounded-[40px] w-full max-w-[360px] text-center shadow-xl border border-yellow-100">
+          <h2 className="text-xl font-black text-[#78350f] mb-2">반가워요 활동가님!</h2>
+          <p className="text-sm text-[#92400e] opacity-70 mb-8">실시간 지도에 합류하기 위해<br/>학번과 이름을 입력해 주세요.</p>
           <form onSubmit={(e) => { e.preventDefault(); if(nickname.trim()){ localStorage.setItem('team_nickname', nickname); setIsSettingNickname(false); } }}>
-            <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} placeholder="예: 30101_홍길동" style={{ width: '100%', padding: '16px', borderRadius: '20px', backgroundColor: '#fefce8', border: '2px solid #fde68a', textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '24px', outline: 'none' }} autoFocus />
-            <button type="submit" style={{ width: '100%', backgroundColor: '#fbbf24', color: 'white', border: 'none', fontWeight: '900', borderRadius: '20px', padding: '18px', fontSize: '1.1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>프로젝트 합류하기 <ChevronRight size={22}/></button>
+            <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} placeholder="예: 30101_홍길동" className="w-full p-4 rounded-2xl bg-[#fefce8] border-2 border-[#fde68a] text-center font-bold text-lg mb-6 outline-none focus:border-yellow-400 transition-all" autoFocus />
+            <button type="submit" className="w-full bg-[#fbbf24] text-white font-black rounded-2xl p-4 text-lg shadow-md flex items-center justify-center gap-2 active:scale-95 transition-transform">프로젝트 합류하기 <ChevronRight size={22}/></button>
           </form>
         </div>
       </div>
@@ -322,123 +314,121 @@ const App = () => {
   const solvedCount = reports.filter(r => r.status === 'solved').length;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', backgroundColor: '#fefce8', fontFamily: '-apple-system, sans-serif' }}>
-      <header style={{ height: '65px', backgroundColor: 'white', borderBottom: '1px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', zIndex: 1000 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <div className="fixed inset-0 flex flex-col bg-[#fefce8] font-sans">
+      <header className="h-[65px] bg-white border-b border-[#fde68a] flex items-center justify-between px-5 z-[1000]">
+        <div className="flex items-center gap-2">
           <Flower2 size={18} color="#fbbf24" />
-          <span style={{ fontSize: '14px', fontWeight: '900', color: '#92400e' }}>물금동아 데이지</span>
+          <span className="text-sm font-black text-[#92400e]">물금동아 데이지</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ backgroundColor: isAdmin ? '#fee2e2' : '#fffbeb', color: isAdmin ? '#ef4444' : '#b45309', fontWeight: '900', fontSize: '10px', padding: '4px 12px', borderRadius: '20px', border: '1px solid #fde68a' }}>{nickname}</span>
-          <button onClick={handleLogout} style={{ border: 'none', background: '#fefce8', padding: '8px', borderRadius: '10px', color: '#b45309', cursor: 'pointer' }}><LogOut size={16}/></button>
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-black px-3 py-1 rounded-full border ${isAdmin ? 'bg-red-50 text-red-500 border-red-200' : 'bg-yellow-50 text-[#b45309] border-yellow-200'}`}>{nickname}</span>
+          <button onClick={handleLogout} className="p-2 bg-[#fefce8] rounded-xl text-[#b45309] active:scale-90 transition-transform"><LogOut size={16}/></button>
         </div>
       </header>
 
-      <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+      <main className="flex-1 relative overflow-hidden">
         {/* Tab 1: 지도 */}
-        <div style={{ position: 'absolute', inset: 0, visibility: activeTab === 'map' ? 'visible' : 'hidden', zIndex: 1 }}>
-          <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
-          <button onClick={() => setActiveTab('add')} style={{ position: 'absolute', bottom: '30px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#78350f', color: 'white', border: 'none', fontWeight: '900', borderRadius: '30px', padding: '15px 35px', zIndex: 1001, boxShadow: '0 4px 15px rgba(0,0,0,0.3)', cursor: 'pointer' }}>기록하기 +</button>
+        <div className={`absolute inset-0 z-10 ${activeTab === 'map' ? 'visible' : 'hidden'}`}>
+          <div ref={mapContainerRef} className="w-full h-full" />
+          <button onClick={() => setActiveTab('add')} className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-[#78350f] text-white font-black px-10 py-4 rounded-full z-[1001] shadow-2xl active:scale-95 transition-transform">기록하기 +</button>
         </div>
 
-        {/* Tab 2: 추가 (오버레이) */}
-        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', transform: activeTab === 'add' ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 0.4s ease', padding: '24px', overflowY: 'auto', zIndex: 2000 }}>
-           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-             <h2 style={{ fontWeight: '900', color: '#78350f', margin: 0 }}>NEW RECORD</h2>
-             <button onClick={() => setActiveTab('map')} style={{ border: 'none', background: 'white', padding: '8px', borderRadius: '12px', cursor: 'pointer' }}><X/></button>
+        {/* Tab 2: 추가 */}
+        <div className={`absolute inset-0 bg-[#fefce8] p-6 overflow-y-auto z-[2000] transition-transform duration-300 ${activeTab === 'add' ? 'translate-y-0' : 'translate-y-full'}`}>
+           <div className="flex justify-between items-center mb-6">
+             <h2 className="text-2xl font-black text-[#78350f]">NEW RECORD</h2>
+             <button onClick={() => setActiveTab('map')} className="p-2 bg-white rounded-xl shadow-sm"><X size={20}/></button>
            </div>
-           <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-               <button type="button" onClick={getGPS} style={{ height: '100px', borderRadius: '24px', backgroundColor: '#78350f', color: 'white', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}>
+           <form onSubmit={handleSave} className="flex flex-col gap-4">
+             <div className="grid grid-cols-2 gap-3">
+               <button type="button" onClick={getGPS} className="h-24 rounded-3xl bg-[#78350f] text-white flex flex-col items-center justify-center gap-2 active:scale-95 transition-transform">
                  <MapPin size={24} color={formData.customLocation ? "#fbbf24" : "white"} />
-                 <span style={{ fontSize: '10px', fontWeight: '900' }}>{isLocating ? "수신 중..." : formData.customLocation ? "위치 완료" : "내 위치 찾기"}</span>
+                 <span className="text-[10px] font-black">{isLocating ? "수신 중..." : formData.customLocation ? "위치 완료" : "내 위치 찾기"}</span>
                </button>
-               <label style={{ height: '100px', borderRadius: '24px', backgroundColor: 'white', border: '2px dashed #fde68a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer', overflow: 'hidden' }}>
-                 <input type="file" accept="image/*" onChange={handleImageChange} style={{ display: 'none' }} />
-                 {formData.image ? <img src={formData.image} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <><Camera size={24} color="#fbbf24"/><span style={{ fontSize: '10px', fontWeight: '900', color: '#fbbf24' }}>사진 추가</span></>}
+               <label className="h-24 rounded-3xl bg-white border-2 border-dashed border-[#fde68a] flex flex-col items-center justify-center gap-2 cursor-pointer overflow-hidden active:scale-95 transition-transform">
+                 <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+                 {formData.image ? <img src={formData.image} className="w-full h-full object-cover" /> : <><Camera size={24} color="#fbbf24"/><span className="text-[10px] font-black text-[#fbbf24]">사진 추가</span></>}
                </label>
              </div>
-             <select value={formData.area} onChange={e => setFormData({...formData, area: e.target.value})} style={{ padding: '16px', borderRadius: '15px', border: '2px solid #fde68a', backgroundColor: 'white', fontWeight: 'bold', outline: 'none' }}>
+             <select value={formData.area} onChange={e => setFormData({...formData, area: e.target.value})} className="p-4 rounded-2xl border-2 border-[#fde68a] font-bold outline-none">
                {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
              </select>
-             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+             <div className="grid grid-cols-2 gap-2">
                {TRASH_CATEGORIES.map(c => (
-                 <button key={c.id} type="button" onClick={() => setFormData({...formData, category: c.id})} style={{ padding: '14px', borderRadius: '15px', border: '2px solid', borderColor: formData.category === c.id ? '#fbbf24' : 'transparent', background: 'white', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                   <span>{c.icon}</span><span style={{ fontSize: '11px' }}>{c.label}</span>
+                 <button key={c.id} type="button" onClick={() => setFormData({...formData, category: c.id})} className={`p-4 rounded-2xl border-2 flex items-center gap-2 transition-all ${formData.category === c.id ? 'border-[#fbbf24] bg-white shadow-inner' : 'border-transparent bg-white'}`}>
+                   <span className="text-lg">{c.icon}</span><span className="text-[11px] font-black">{c.label}</span>
                  </button>
                ))}
              </div>
-             <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="상황을 입력해 주세요." style={{ padding: '18px', borderRadius: '15px', height: '100px', border: '2px solid #fde68a', outline: 'none', resize: 'none' }} />
-             <button disabled={isUploading} style={{ backgroundColor: '#fbbf24', color: 'white', padding: '18px', borderRadius: '20px', border: 'none', fontWeight: '900', fontSize: '1.1rem', cursor: isUploading ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+             <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="상황을 입력해 주세요." className="p-5 rounded-3xl h-32 border-2 border-[#fde68a] outline-none resize-none" />
+             <button disabled={isUploading} className="bg-[#fbbf24] text-white p-5 rounded-[25px] font-black text-lg shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
                {isUploading ? <Loader2 className="animate-spin" size={20}/> : "지도에 업로드"}
              </button>
            </form>
         </div>
 
         {/* Tab 3: 아카이브 */}
-        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', visibility: activeTab === 'list' ? 'visible' : 'hidden', opacity: activeTab === 'list' ? 1 : 0, transition: 'opacity 0.3s', padding: '24px', overflowY: 'auto' }}>
-           <h2 style={{ fontWeight: '900', color: '#78350f', marginBottom: '24px' }}>TEAM ARCHIVE</h2>
-           {reports.length === 0 ? <div style={{ textAlign: 'center', padding: '40px', color: '#d97706', opacity: 0.6 }}>기록이 없습니다.</div> : reports.map(r => (
-             <div key={r.id} style={{ background: 'white', padding: '20px', borderRadius: '24px', marginBottom: '16px', border: '1px solid #fde68a', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
-               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center' }}>
-                 <span style={{ fontWeight: '900', color: '#78350f', fontSize: '14px' }}>{TRASH_CATEGORIES.find(c => c.id === r.category)?.icon} {r.area}</span>
-                 <button onClick={() => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', r.id), { status: r.status === 'pending' ? 'solved' : 'pending' })} style={{ border: 'none', padding: '6px 12px', borderRadius: '10px', fontSize: '10px', fontWeight: '900', background: r.status === 'solved' ? '#fbbf24' : '#fffbeb', color: r.status === 'solved' ? 'white' : '#b45309', cursor: 'pointer' }}>{r.status === 'solved' ? '해결됨 ✓' : '진행중'}</button>
+        <div className={`absolute inset-0 bg-[#fefce8] p-6 overflow-y-auto ${activeTab === 'list' ? 'visible' : 'hidden'}`}>
+           <h2 className="text-2xl font-black text-[#78350f] mb-6">TEAM ARCHIVE</h2>
+           {reports.length === 0 ? <div className="text-center py-20 text-[#d97706] font-bold opacity-40">기록이 없습니다.</div> : reports.map(r => (
+             <div key={r.id} className="bg-white p-5 rounded-[32px] mb-4 border border-[#fde68a] shadow-sm animate-in fade-in slide-in-from-bottom-2">
+               <div className="flex justify-between items-center mb-4">
+                 <span className="text-sm font-black text-[#78350f] flex items-center gap-1">{TRASH_CATEGORIES.find(c => c.id === r.category)?.icon} {r.area}</span>
+                 <button onClick={() => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', r.id), { status: r.status === 'pending' ? 'solved' : 'pending' })} className={`text-[10px] font-black px-3 py-1 rounded-full ${r.status === 'solved' ? 'bg-[#fbbf24] text-white' : 'bg-yellow-50 text-[#b45309]'}`}>{r.status === 'solved' ? '해결됨 ✓' : '진행중'}</button>
                </div>
-               {r.image && <img src={r.image} style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '18px', marginBottom: '12px' }} />}
-               <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#451a03', lineHeight: '1.5' }}>{r.description || "내용 없음"}</p>
-               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid #fffbeb' }}>
-                 <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '800' }}>👤 {r.userName}</span>
-                 {(r.userName === nickname || isAdmin) && <button onClick={() => handleDelete(r.id)} style={{ border: 'none', background: 'none', color: '#fca5a5', cursor: 'pointer' }}><Trash2 size={16}/></button>}
+               {r.image && <img src={r.image} className="w-full h-48 object-cover rounded-3xl mb-4" />}
+               <p className="text-sm text-[#451a03] leading-relaxed mb-4 font-medium px-1">{r.description || "내용 없음"}</p>
+               <div className="flex justify-between items-center pt-3 border-t border-yellow-50">
+                 <span className="text-[11px] text-[#92400e] font-black opacity-60 flex items-center gap-1"><User size={12}/> {r.userName}</span>
+                 {(r.userName === nickname || isAdmin) && <button onClick={() => handleDelete(r.id)} className="p-1 text-red-300 hover:text-red-500 active:scale-90 transition-all"><Trash2 size={18}/></button>}
                </div>
              </div>
            ))}
         </div>
 
         {/* Tab 4: 통계 */}
-        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', visibility: activeTab === 'stats' ? 'visible' : 'hidden', opacity: activeTab === 'stats' ? 1 : 0, transition: 'opacity 0.3s', padding: '24px', overflowY: 'auto' }}>
-           <h2 style={{ fontWeight: '900', color: '#78350f', marginBottom: '24px' }}>ACTIVITY STATS</h2>
-           <div style={{ backgroundColor: '#78350f', padding: '30px', borderRadius: '32px', color: 'white', textAlign: 'center', marginBottom: '20px' }}>
-              <h3 style={{ fontSize: '3rem', fontWeight: '900', margin: '0' }}>{solvedCount}</h3>
-              <p style={{ fontSize: '0.8rem', fontWeight: '900', color: '#fbbf24', opacity: 0.8, letterSpacing: '2px' }}>CLEANED UP!</p>
+        <div className={`absolute inset-0 bg-[#fefce8] p-6 overflow-y-auto ${activeTab === 'stats' ? 'visible' : 'hidden'}`}>
+           <h2 className="text-2xl font-black text-[#78350f] mb-6">ACTIVITY STATS</h2>
+           <div className="bg-[#78350f] p-10 rounded-[40px] text-center mb-5 shadow-xl">
+              <h3 className="text-5xl font-black text-white mb-1">{solvedCount}</h3>
+              <p className="text-xs font-black text-[#fbbf24] tracking-widest opacity-80 uppercase">Cleaned Up!</p>
            </div>
-           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '30px' }}>
-              <div style={{ background: 'white', padding: '20px', borderRadius: '24px', textAlign: 'center' }}><p style={{ margin: 0, fontSize: '10px', color: '#92400e', fontWeight: '900' }}>TOTAL</p><p style={{ margin: '5px 0 0 0', fontSize: '20px', fontWeight: '900' }}>{reports.length}</p></div>
-              <div style={{ background: 'white', padding: '20px', borderRadius: '24px', textAlign: 'center' }}><p style={{ margin: 0, fontSize: '10px', color: '#92400e', fontWeight: '900' }}>RATE</p><p style={{ margin: '5px 0 0 0', fontSize: '20px', fontWeight: '900', color: '#fbbf24' }}>{reports.length > 0 ? Math.round((solvedCount/reports.length)*100) : 0}%</p></div>
+           <div className="grid grid-cols-2 gap-4 mb-10">
+              <div className="bg-white p-6 rounded-[30px] text-center border border-yellow-100 shadow-sm"><p className="text-[10px] font-black text-[#92400e] opacity-50 mb-1 uppercase">Total Found</p><p className="text-2xl font-black text-[#78350f]">{reports.length}</p></div>
+              <div className="bg-white p-6 rounded-[30px] text-center border border-yellow-100 shadow-sm"><p className="text-[10px] font-black text-[#92400e] opacity-50 mb-1 uppercase">Success Rate</p><p className="text-2xl font-black text-[#fbbf24]">{reports.length > 0 ? Math.round((solvedCount/reports.length)*100) : 0}%</p></div>
            </div>
 
            {isAdmin && (
-              <div style={{ background: 'white', padding: '24px', borderRadius: '32px', border: '2px dashed #fca5a5', textAlign: 'center' }}>
-                 <h4 style={{ color: '#ef4444', fontWeight: '900', margin: '0 0 10px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><AlertTriangle size={18}/> ADMIN TOOLS</h4>
-                 <p style={{ fontSize: '0.75rem', color: '#92400e', opacity: 0.6, marginBottom: '20px' }}>관리자 권한으로 모든 데이터를 삭제할 수 있습니다.</p>
-                 <button onClick={clearAllData} style={{ width: '100%', background: '#ef4444', color: 'white', border: 'none', padding: '14px', borderRadius: '15px', fontWeight: '900', cursor: 'pointer' }}>데이터 초기화</button>
+              <div className="bg-white p-8 rounded-[40px] border-2 border-dashed border-red-200 text-center shadow-md animate-pulse">
+                 <h4 className="text-red-500 font-black mb-2 flex items-center justify-center gap-2"><AlertTriangle size={20}/> ADMIN TOOLS</h4>
+                 <p className="text-xs text-[#92400e] opacity-60 mb-6 font-bold">관리자 권한으로 전체 데이터를<br/>영구히 삭제할 수 있습니다.</p>
+                 <button onClick={clearAllData} className="w-full bg-red-500 text-white p-4 rounded-2xl font-black shadow-lg active:scale-95 transition-transform">모든 데이터 초기화</button>
               </div>
            )}
         </div>
       </main>
 
-      <nav style={{ height: '75px', backgroundColor: 'white', borderTop: '1px solid #fde68a', display: 'flex', justifyContent: 'space-around', alignItems: 'center', paddingBottom: '10px' }}>
-        <button onClick={() => setActiveTab('map')} style={{ border: 'none', background: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-          <MapPin size={24} color={activeTab === 'map' ? '#fbbf24' : '#d97706'} fill={activeTab === 'map' ? '#fbbf24' : 'none'}/>
-          <span style={{ fontSize: '10px', fontWeight: '900', color: activeTab === 'map' ? '#fbbf24' : '#d97706' }}>지도</span>
+      <nav className="h-[75px] bg-white border-t border-[#fde68a] flex justify-around items-center px-2 pb-2">
+        <button onClick={() => setActiveTab('map')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'map' ? 'text-[#fbbf24]' : 'text-gray-300'}`}>
+          <MapPin size={24} fill={activeTab === 'map' ? 'currentColor' : 'none'} strokeWidth={3}/>
+          <span className="text-[10px] font-black">지도</span>
         </button>
-        <button onClick={() => setActiveTab('list')} style={{ border: 'none', background: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-          <List size={24} color={activeTab === 'list' ? '#fbbf24' : '#d97706'}/>
-          <span style={{ fontSize: '10px', fontWeight: '900', color: activeTab === 'list' ? '#fbbf24' : '#d97706' }}>피드</span>
+        <button onClick={() => setActiveTab('list')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'list' ? 'text-[#fbbf24]' : 'text-gray-300'}`}>
+          <List size={24} strokeWidth={3}/>
+          <span className="text-[10px] font-black">피드</span>
         </button>
-        <button onClick={() => setActiveTab('stats')} style={{ border: 'none', background: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-          <BarChart3 size={24} color={activeTab === 'stats' ? '#fbbf24' : '#d97706'}/>
-          <span style={{ fontSize: '10px', fontWeight: '900', color: activeTab === 'stats' ? '#fbbf24' : '#d97706' }}>통계</span>
+        <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'stats' ? 'text-[#fbbf24]' : 'text-gray-300'}`}>
+          <BarChart3 size={24} strokeWidth={3}/>
+          <span className="text-[10px] font-black">통계</span>
         </button>
       </nav>
       <style>{`
+        .leaflet-container { background: #fefce8 !important; z-index: 1 !important; }
         .custom-pin { background: none !important; border: none !important; }
         ::-webkit-scrollbar { width: 0px; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        .animate-spin { animation: spin 1s linear infinite; }
       `}</style>
     </div>
   );
 };
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+export default App;

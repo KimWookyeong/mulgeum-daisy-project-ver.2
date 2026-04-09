@@ -40,7 +40,7 @@ import {
  * [물금동아 데이지 프로젝트 - 최종 통합 복구본]
  * 1. 실행 오류 해결: ReactDOM.createRoot 렌더링 코드 추가
  * 2. 관리자 모드 최적화: 지도 로딩 지연 및 삭제/초기화 권한 로직 강화
- * 3. 디자인: 연노랑 배경에서 흰색 꽃잎이 잘 보이도록 테두리(Stroke) 보강
+ * 3. 디자인: 연노랑 배경에서 흰색 꽃잎이 잘 보이도록 테두리(Stroke) 및 대비 강화
  */
 
 const firebaseConfig = {
@@ -70,23 +70,23 @@ const TRASH_CATEGORIES = [
 const AREAS = ["물금읍", "증산리", "가촌리", "범어리", "기타 구역"];
 const INITIAL_CENTER = [35.327, 129.007]; 
 
-// 디자인 개선된 데이지 꽃 글자 디자인
+// 시인성이 강화된 데이지 꽃 글자 디자인
 const DaisyLetter = ({ letter }) => (
-  <div className="relative inline-flex items-center justify-center w-[42px] h-[42px] mx-[1px] align-middle">
-    <svg viewBox="0 0 100 100" className="absolute w-full h-full drop-shadow-md">
+  <div className="relative inline-flex items-center justify-center w-[48px] h-[48px] mx-[2px] align-middle">
+    <svg viewBox="0 0 100 100" className="absolute w-full h-full drop-shadow-lg">
       {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
         <ellipse 
           key={angle} 
-          cx="50" cy="25" rx="12" ry="25" 
+          cx="50" cy="25" rx="14" ry="28" 
           fill="white" 
-          stroke="#fde68a" 
-          strokeWidth="2"
+          stroke="#fbbf24" // 대비를 위해 더 진한 노란색 테두리 적용
+          strokeWidth="3"
           transform={`rotate(${angle} 50 50)`} 
         />
       ))}
-      <circle cx="50" cy="50" r="18" fill="#fbbf24" stroke="#d97706" strokeWidth="1" />
+      <circle cx="50" cy="50" r="20" fill="#fbbf24" stroke="#d97706" strokeWidth="2" />
     </svg>
-    <span className="relative z-10 font-black text-[15px] text-[#451a03] mt-[1px]">{letter}</span>
+    <span className="relative z-10 font-black text-[17px] text-[#451a03] mt-[1px]">{letter}</span>
   </div>
 );
 

@@ -37,10 +37,10 @@ import {
 } from 'lucide-react';
 
 /**
- * [물금동아 데이지 프로젝트 - 디자인 및 기능 최종 수정본]
- * 1. 디자인: 데이지 꽃잎에 테두리와 그림자를 추가하여 시인성 확보
- * 2. 레이아웃: 슬로건 정렬 및 폰트 강조
- * 3. 기능: 지도 로딩 최적화 및 Firestore 저장 로직 강화
+ * [물금동아 데이지 프로젝트 - 관리자 모드 및 기능 완전 복구본]
+ * 1. 해결: 관리자 로그인 시 지도 안 뜨는 현상 (렌더링 타이밍 수정)
+ * 2. 해결: 개별 기록 삭제 및 전체 데이터 초기화 에러 (인증 가드 추가)
+ * 3. 디자인: 데이지 꽃 시인성 개선 테두리 유지
  */
 
 const firebaseConfig = {
@@ -53,7 +53,8 @@ const firebaseConfig = {
   databaseURL: "https://fourseason-run-and-map-default-rtdb.firebaseio.com/" 
 };
 
-const appId = 'mulgeum-daisy-advanced-v2'; 
+// Firestore 규칙 준수를 위한 고유 앱 아이디
+const appId = 'mulgeum-daisy-advanced-final-v3'; 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -69,7 +70,7 @@ const TRASH_CATEGORIES = [
 const AREAS = ["물금읍", "증산리", "가촌리", "범어리", "기타 구역"];
 const INITIAL_CENTER = [35.327, 129.007]; 
 
-// 디자인 개선된 데이지 꽃 글자 디자인 컴포넌트
+// 디자인 개선된 데이지 꽃 글자 디자인
 const DaisyLetter = ({ letter }) => (
   <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', margin: '0 1px', verticalAlign: 'middle' }}>
     <svg viewBox="0 0 100 100" style={{ position: 'absolute', width: '100%', height: '100%', filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.1))' }}>
@@ -78,7 +79,7 @@ const DaisyLetter = ({ letter }) => (
           key={angle} 
           cx="50" cy="25" rx="12" ry="25" 
           fill="white" 
-          stroke="#fde68a" // 꽃잎이 잘 보이도록 얇은 노란색 테두리 추가
+          stroke="#fde68a" 
           strokeWidth="2"
           transform={`rotate(${angle} 50 50)`} 
         />
@@ -140,12 +141,21 @@ const App = () => {
     reader.readAsDataURL(file);
   };
 
+  // 1. 인증 초기화 (Rule 3 준수)
   useEffect(() => {
-    signInAnonymously(auth).catch(console.error);
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (err) {
+        console.error("인증 실패:", err);
+      }
+    };
+    initAuth();
     const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
     return () => unsubscribe();
   }, []);
 
+  // 2. 데이터 실시간 수신 (Rule 1 & 3 준수)
   useEffect(() => {
     if (!user) return;
     const reportsCollection = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
@@ -154,10 +164,11 @@ const App = () => {
         .sort((a, b) => new Date(b.discoveredTime).getTime() - new Date(a.discoveredTime).getTime());
       setReports(formatted);
       updateMarkers(formatted);
-    });
+    }, (err) => console.error("데이터 수신 오류:", err));
     return () => unsubscribe();
   }, [user, nickname]);
 
+  // 3. 지도 라이브러리 로드
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'stylesheet'; link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
@@ -168,17 +179,25 @@ const App = () => {
     document.head.appendChild(script);
   }, []);
 
+  // 4. 지도 초기화 및 크기 보정 (중요: admin 로그인 직후 지도가 안 뜨는 문제 해결)
   useEffect(() => {
     if (isScriptLoaded && !isSettingNickname && activeTab === 'map' && mapContainerRef.current) {
       if (!leafletMap.current) {
+        // DOM이 안정화된 후 지도를 생성하기 위해 약간 더 긴 지연 시간을 줌
         setTimeout(() => {
           if (!mapContainerRef.current) return;
-          leafletMap.current = window.L.map(mapContainerRef.current, { zoomControl: false, attributionControl: false }).setView(INITIAL_CENTER, 14);
+          leafletMap.current = window.L.map(mapContainerRef.current, { 
+            zoomControl: false, 
+            attributionControl: false 
+          }).setView(INITIAL_CENTER, 14);
           window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMap.current);
           updateMarkers(reports);
-        }, 500);
+        }, 600);
       } else { 
-        setTimeout(() => { leafletMap.current.invalidateSize(); }, 300);
+        // 탭 전환 시 지도가 깨지는 현상 방지
+        setTimeout(() => {
+          if (leafletMap.current) leafletMap.current.invalidateSize();
+        }, 400);
       }
     }
   }, [isScriptLoaded, activeTab, isSettingNickname]);
@@ -238,8 +257,22 @@ const App = () => {
     } catch (err) { alert("업로드 실패!"); } finally { setIsUploading(false); }
   };
 
+  // 개별 삭제 기능 수정 (Rule 3 준수)
+  const handleDelete = async (reportId) => {
+    if (!user) return;
+    if (window.confirm("이 기록을 삭제하시겠습니까?")) {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', reportId));
+        alert("기록이 삭제되었습니다.");
+      } catch (err) {
+        alert("삭제에 실패했습니다: " + err.message);
+      }
+    }
+  };
+
+  // 전체 초기화 기능 수정 (Rule 3 준수)
   const clearAllData = async () => {
-    if (!isAdmin) return;
+    if (!isAdmin || !user) return;
     if (window.confirm("🚨 경고: 모든 활동 기록이 영구 삭제됩니다. 계속하시겠습니까?")) {
       try {
         const coll = collection(db, 'artifacts', appId, 'public', 'data', 'reports');
@@ -248,7 +281,9 @@ const App = () => {
         snapshot.docs.forEach((doc) => batch.delete(doc.ref));
         await batch.commit();
         alert("모든 기록이 초기화되었습니다.");
-      } catch (err) { alert("삭제 실패"); }
+      } catch (err) { 
+        alert("초기화 실패: " + err.message); 
+      }
     }
   };
 
@@ -353,7 +388,7 @@ const App = () => {
                <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#451a03', lineHeight: '1.5' }}>{r.description || "내용 없음"}</p>
                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid #fffbeb' }}>
                  <span style={{ fontSize: '11px', color: '#92400e', fontWeight: '800' }}>👤 {r.userName}</span>
-                 {(r.userName === nickname || isAdmin) && <button onClick={() => { if(window.confirm("삭제하시겠습니까?")) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', r.id)); }} style={{ border: 'none', background: 'none', color: '#fca5a5', cursor: 'pointer' }}><Trash2 size={16}/></button>}
+                 {(r.userName === nickname || isAdmin) && <button onClick={() => handleDelete(r.id)} style={{ border: 'none', background: 'none', color: '#fca5a5', cursor: 'pointer' }}><Trash2 size={16}/></button>}
                </div>
              </div>
            ))}

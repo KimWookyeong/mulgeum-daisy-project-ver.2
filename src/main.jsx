@@ -37,9 +37,10 @@ import {
 } from 'lucide-react';
 
 /**
- * [물금동아 데이지 프로젝트 - 포시즌 기능 통합 고도화 버전]
- * 1. 디자인: 데이지 고유의 노란색 테마 (#fefce8) 및 꽃 타이틀 유지
- * 2. 기능: 이미지 압축 업로드, GPS 수신, 활동 통계(STATS), 관리자(admin) 초기화 권한
+ * [물금동아 데이지 프로젝트 - 디자인 및 기능 최종 수정본]
+ * 1. 디자인: 데이지 꽃잎에 테두리와 그림자를 추가하여 시인성 확보
+ * 2. 레이아웃: 슬로건 정렬 및 폰트 강조
+ * 3. 기능: 지도 로딩 최적화 및 Firestore 저장 로직 강화
  */
 
 const firebaseConfig = {
@@ -52,7 +53,7 @@ const firebaseConfig = {
   databaseURL: "https://fourseason-run-and-map-default-rtdb.firebaseio.com/" 
 };
 
-const appId = 'mulgeum-daisy-advanced-v1'; 
+const appId = 'mulgeum-daisy-advanced-v2'; 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -68,16 +69,23 @@ const TRASH_CATEGORIES = [
 const AREAS = ["물금읍", "증산리", "가촌리", "범어리", "기타 구역"];
 const INITIAL_CENTER = [35.327, 129.007]; 
 
-// 데이지 꽃 글자 디자인
+// 디자인 개선된 데이지 꽃 글자 디자인 컴포넌트
 const DaisyLetter = ({ letter }) => (
-  <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '38px', height: '38px', margin: '0 1px', verticalAlign: 'middle' }}>
-    <svg viewBox="0 0 100 100" style={{ position: 'absolute', width: '100%', height: '100%' }}>
+  <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '42px', height: '42px', margin: '0 1px', verticalAlign: 'middle' }}>
+    <svg viewBox="0 0 100 100" style={{ position: 'absolute', width: '100%', height: '100%', filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.1))' }}>
       {[0, 45, 90, 135, 180, 225, 270, 315].map((angle) => (
-        <ellipse key={angle} cx="50" cy="25" rx="12" ry="25" fill="white" transform={`rotate(${angle} 50 50)`} />
+        <ellipse 
+          key={angle} 
+          cx="50" cy="25" rx="12" ry="25" 
+          fill="white" 
+          stroke="#fde68a" // 꽃잎이 잘 보이도록 얇은 노란색 테두리 추가
+          strokeWidth="2"
+          transform={`rotate(${angle} 50 50)`} 
+        />
       ))}
-      <circle cx="50" cy="50" r="18" fill="#fbbf24" />
+      <circle cx="50" cy="50" r="18" fill="#fbbf24" stroke="#d97706" strokeWidth="1" />
     </svg>
-    <span style={{ position: 'relative', zIndex: 1, fontWeight: '900', fontSize: '14px', color: '#451a03', marginTop: '1px' }}>{letter}</span>
+    <span style={{ position: 'relative', zIndex: 1, fontWeight: '900', fontSize: '15px', color: '#451a03', marginTop: '1px' }}>{letter}</span>
   </div>
 );
 
@@ -111,16 +119,10 @@ const App = () => {
         const MAX_WIDTH = 800;
         let width = img.width;
         let height = img.height;
-        if (width > MAX_WIDTH) {
-          height *= MAX_WIDTH / width;
-          width = MAX_WIDTH;
-        }
+        if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
         canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.6));
-        }
+        if (ctx) { ctx.drawImage(img, 0, 0, width, height); resolve(canvas.toDataURL('image/jpeg', 0.6)); }
       };
     });
   };
@@ -174,8 +176,10 @@ const App = () => {
           leafletMap.current = window.L.map(mapContainerRef.current, { zoomControl: false, attributionControl: false }).setView(INITIAL_CENTER, 14);
           window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(leafletMap.current);
           updateMarkers(reports);
-        }, 300);
-      } else { leafletMap.current.invalidateSize(); }
+        }, 500);
+      } else { 
+        setTimeout(() => { leafletMap.current.invalidateSize(); }, 300);
+      }
     }
   }, [isScriptLoaded, activeTab, isSettingNickname]);
 
@@ -200,6 +204,7 @@ const App = () => {
       localStorage.removeItem('team_nickname');
       setNickname('');
       setIsSettingNickname(true);
+      if(leafletMap.current) { leafletMap.current.remove(); leafletMap.current = null; }
       signOut(auth);
     }
   };
@@ -220,6 +225,7 @@ const App = () => {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (!user) return alert("인증 처리 중입니다. 잠시만 기다려주세요.");
     setIsUploading(true);
     try {
       const center = leafletMap.current ? leafletMap.current.getCenter() : { lat: INITIAL_CENTER[0], lng: INITIAL_CENTER[1] };
@@ -250,21 +256,27 @@ const App = () => {
     return (
       <div style={{ position: 'fixed', inset: 0, backgroundColor: '#fefce8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 9999 }}>
         <div style={{ marginBottom: '40px', textAlign: 'center' }}>
-          <div style={{ backgroundColor: '#fbbf24', width: '70px', height: '70px', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', transform: 'rotate(-5deg)', boxShadow: '0 10px 25px rgba(251,191,36,0.2)' }}>
+          <div style={{ backgroundColor: '#fbbf24', width: '70px', height: '70px', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 25px', transform: 'rotate(-5deg)', boxShadow: '0 10px 25px rgba(251,191,36,0.2)' }}>
             <Flower2 size={40} color="white" />
           </div>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: '900', color: '#92400e', margin: '0 0 16px 0' }}>물금동아</h1>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', whiteSpace: 'nowrap' }}>
-            <DaisyLetter letter="데" /><span style={{ fontSize: '13px', fontWeight: '800', color: '#92400e' }}>이터를</span>
-            <DaisyLetter letter="이" /><span style={{ fontSize: '13px', fontWeight: '800', color: '#92400e' }}>용한</span>
-            <DaisyLetter letter="지" /><span style={{ fontSize: '13px', fontWeight: '800', color: '#92400e' }}>역 쓰레기 해결</span>
+          <h1 style={{ fontSize: '2.5rem', fontWeight: '900', color: '#92400e', margin: '0 0 20px 0', letterSpacing: '-0.02em' }}>물금동아</h1>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '2px', lineHeight: '1.2' }}>
+            <div style={{display:'flex', alignItems:'center'}}>
+              <DaisyLetter letter="데" /><span style={{ fontSize: '14px', fontWeight: '800', color: '#78350f' }}>이터를</span>
+            </div>
+            <div style={{display:'flex', alignItems:'center'}}>
+              <DaisyLetter letter="이" /><span style={{ fontSize: '14px', fontWeight: '800', color: '#78350f' }}>용한</span>
+            </div>
+            <div style={{display:'flex', alignItems:'center'}}>
+              <DaisyLetter letter="지" /><span style={{ fontSize: '14px', fontWeight: '800', color: '#78350f' }}>역 쓰레기 해결</span>
+            </div>
           </div>
         </div>
         <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '40px', width: '100%', maxWidth: '360px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.05)' }}>
           <h2 style={{ fontSize: '1.25rem', fontWeight: '900', color: '#78350f', marginBottom: '8px' }}>반가워요 활동가님!</h2>
-          <p style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '24px', opacity: 0.7 }}>실시간 지도에 합류하기 위해<br/>닉네임을 입력해 주세요.</p>
+          <p style={{ fontSize: '0.85rem', color: '#92400e', marginBottom: '24px', opacity: 0.7 }}>실시간 지도에 합류하기 위해<br/>학번과 이름을 입력해 주세요.</p>
           <form onSubmit={(e) => { e.preventDefault(); if(nickname.trim()){ localStorage.setItem('team_nickname', nickname); setIsSettingNickname(false); } }}>
-            <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} placeholder="예: 학번_이름" style={{ width: '100%', padding: '16px', borderRadius: '20px', backgroundColor: '#fefce8', border: '2px solid #fde68a', textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '24px', outline: 'none' }} autoFocus />
+            <input type="text" value={nickname} onChange={e => setNickname(e.target.value)} placeholder="예: 30101_홍길동" style={{ width: '100%', padding: '16px', borderRadius: '20px', backgroundColor: '#fefce8', border: '2px solid #fde68a', textAlign: 'center', fontWeight: 'bold', fontSize: '1.1rem', marginBottom: '24px', outline: 'none' }} autoFocus />
             <button type="submit" style={{ width: '100%', backgroundColor: '#fbbf24', color: 'white', border: 'none', fontWeight: '900', borderRadius: '20px', padding: '18px', fontSize: '1.1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>프로젝트 합류하기 <ChevronRight size={22}/></button>
           </form>
         </div>
@@ -283,26 +295,26 @@ const App = () => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <span style={{ backgroundColor: isAdmin ? '#fee2e2' : '#fffbeb', color: isAdmin ? '#ef4444' : '#b45309', fontWeight: '900', fontSize: '10px', padding: '4px 12px', borderRadius: '20px', border: '1px solid #fde68a' }}>{nickname}</span>
-          <button onClick={handleLogout} style={{ border: 'none', background: '#fefce8', padding: '8px', borderRadius: '10px', color: '#b45309' }}><LogOut size={16}/></button>
+          <button onClick={handleLogout} style={{ border: 'none', background: '#fefce8', padding: '8px', borderRadius: '10px', color: '#b45309', cursor: 'pointer' }}><LogOut size={16}/></button>
         </div>
       </header>
 
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         {/* Tab 1: 지도 */}
-        <div style={{ position: 'absolute', inset: 0, visibility: activeTab === 'map' ? 'visible' : 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, visibility: activeTab === 'map' ? 'visible' : 'hidden', zIndex: 1 }}>
           <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
           <button onClick={() => setActiveTab('add')} style={{ position: 'absolute', bottom: '30px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#78350f', color: 'white', border: 'none', fontWeight: '900', borderRadius: '30px', padding: '15px 35px', zIndex: 1001, boxShadow: '0 4px 15px rgba(0,0,0,0.3)', cursor: 'pointer' }}>기록하기 +</button>
         </div>
 
-        {/* Tab 2: 추가 */}
-        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', display: activeTab === 'add' ? 'block' : 'none', padding: '24px', overflowY: 'auto', zIndex: 2000 }}>
+        {/* Tab 2: 추가 (오버레이) */}
+        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', transform: activeTab === 'add' ? 'translateY(0)' : 'translateY(100%)', transition: 'transform 0.4s ease', padding: '24px', overflowY: 'auto', zIndex: 2000 }}>
            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
              <h2 style={{ fontWeight: '900', color: '#78350f', margin: 0 }}>NEW RECORD</h2>
-             <button onClick={() => setActiveTab('map')} style={{ border: 'none', background: 'white', padding: '8px', borderRadius: '12px' }}><X/></button>
+             <button onClick={() => setActiveTab('map')} style={{ border: 'none', background: 'white', padding: '8px', borderRadius: '12px', cursor: 'pointer' }}><X/></button>
            </div>
            <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-               <button type="button" onClick={getGPS} style={{ height: '100px', borderRadius: '24px', backgroundColor: '#78350f', color: 'white', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+               <button type="button" onClick={getGPS} style={{ height: '100px', borderRadius: '24px', backgroundColor: '#78350f', color: 'white', border: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' }}>
                  <MapPin size={24} color={formData.customLocation ? "#fbbf24" : "white"} />
                  <span style={{ fontSize: '10px', fontWeight: '900' }}>{isLocating ? "수신 중..." : formData.customLocation ? "위치 완료" : "내 위치 찾기"}</span>
                </button>
@@ -316,26 +328,26 @@ const App = () => {
              </select>
              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                {TRASH_CATEGORIES.map(c => (
-                 <button key={c.id} type="button" onClick={() => setFormData({...formData, category: c.id})} style={{ padding: '14px', borderRadius: '15px', border: '2px solid', borderColor: formData.category === c.id ? '#fbbf24' : 'transparent', background: 'white', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                 <button key={c.id} type="button" onClick={() => setFormData({...formData, category: c.id})} style={{ padding: '14px', borderRadius: '15px', border: '2px solid', borderColor: formData.category === c.id ? '#fbbf24' : 'transparent', background: 'white', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                    <span>{c.icon}</span><span style={{ fontSize: '11px' }}>{c.label}</span>
                  </button>
                ))}
              </div>
              <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} placeholder="상황을 입력해 주세요." style={{ padding: '18px', borderRadius: '15px', height: '100px', border: '2px solid #fde68a', outline: 'none', resize: 'none' }} />
-             <button disabled={isUploading} style={{ backgroundColor: '#fbbf24', color: 'white', padding: '18px', borderRadius: '20px', border: 'none', fontWeight: '900', fontSize: '1.1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
+             <button disabled={isUploading} style={{ backgroundColor: '#fbbf24', color: 'white', padding: '18px', borderRadius: '20px', border: 'none', fontWeight: '900', fontSize: '1.1rem', cursor: isUploading ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
                {isUploading ? <Loader2 className="animate-spin" size={20}/> : "지도에 업로드"}
              </button>
            </form>
         </div>
 
         {/* Tab 3: 아카이브 */}
-        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', display: activeTab === 'list' ? 'block' : 'none', padding: '24px', overflowY: 'auto' }}>
+        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', visibility: activeTab === 'list' ? 'visible' : 'hidden', opacity: activeTab === 'list' ? 1 : 0, transition: 'opacity 0.3s', padding: '24px', overflowY: 'auto' }}>
            <h2 style={{ fontWeight: '900', color: '#78350f', marginBottom: '24px' }}>TEAM ARCHIVE</h2>
            {reports.length === 0 ? <div style={{ textAlign: 'center', padding: '40px', color: '#d97706', opacity: 0.6 }}>기록이 없습니다.</div> : reports.map(r => (
              <div key={r.id} style={{ background: 'white', padding: '20px', borderRadius: '24px', marginBottom: '16px', border: '1px solid #fde68a', boxShadow: '0 4px 10px rgba(0,0,0,0.02)' }}>
                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center' }}>
                  <span style={{ fontWeight: '900', color: '#78350f', fontSize: '14px' }}>{TRASH_CATEGORIES.find(c => c.id === r.category)?.icon} {r.area}</span>
-                 <button onClick={() => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', r.id), { status: r.status === 'pending' ? 'solved' : 'pending' })} style={{ border: 'none', padding: '6px 12px', borderRadius: '10px', fontSize: '10px', fontWeight: '900', background: r.status === 'solved' ? '#fbbf24' : '#fffbeb', color: r.status === 'solved' ? 'white' : '#b45309' }}>{r.status === 'solved' ? '해결됨 ✓' : '진행중'}</button>
+                 <button onClick={() => updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'reports', r.id), { status: r.status === 'pending' ? 'solved' : 'pending' })} style={{ border: 'none', padding: '6px 12px', borderRadius: '10px', fontSize: '10px', fontWeight: '900', background: r.status === 'solved' ? '#fbbf24' : '#fffbeb', color: r.status === 'solved' ? 'white' : '#b45309', cursor: 'pointer' }}>{r.status === 'solved' ? '해결됨 ✓' : '진행중'}</button>
                </div>
                {r.image && <img src={r.image} style={{ width: '100%', height: '180px', objectFit: 'cover', borderRadius: '18px', marginBottom: '12px' }} />}
                <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#451a03', lineHeight: '1.5' }}>{r.description || "내용 없음"}</p>
@@ -348,7 +360,7 @@ const App = () => {
         </div>
 
         {/* Tab 4: 통계 */}
-        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', display: activeTab === 'stats' ? 'block' : 'none', padding: '24px', overflowY: 'auto' }}>
+        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#fefce8', visibility: activeTab === 'stats' ? 'visible' : 'hidden', opacity: activeTab === 'stats' ? 1 : 0, transition: 'opacity 0.3s', padding: '24px', overflowY: 'auto' }}>
            <h2 style={{ fontWeight: '900', color: '#78350f', marginBottom: '24px' }}>ACTIVITY STATS</h2>
            <div style={{ backgroundColor: '#78350f', padding: '30px', borderRadius: '32px', color: 'white', textAlign: 'center', marginBottom: '20px' }}>
               <h3 style={{ fontSize: '3rem', fontWeight: '900', margin: '0' }}>{solvedCount}</h3>
@@ -393,6 +405,5 @@ const App = () => {
   );
 };
 
-// 화면 렌더링
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<App />);
